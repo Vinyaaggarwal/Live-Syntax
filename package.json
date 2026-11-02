@@ -1,0 +1,16 @@
+{
+  "name": "live-syntax-altern",
+  "version": "1.0.0",
+  "description": "Unified Collaborative Cloud IDE with Altern AI Translation & Local Execution Engine",
+  "scripts": {
+    "dev:server": "cd server && npm start",
+    "dev:client": "cd client && npm start",
+    "dev:model": "python model_server/server.py",
+    "dev": "concurrently -k -n \"MODEL,SERVER,CLIENT\" -c \"magenta,blue,green\" \"npm run dev:model\" \"npm run dev:server\" \"npm run dev:client\"",
+    "start": "npm run dev",
+    "install:all": "npm install && cd server && npm install && cd ../client && npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
