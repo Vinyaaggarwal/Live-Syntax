@@ -644,6 +644,59 @@ function EditorPage() {
     }
   };
 
+  const handleFileUpload = (files, targetFolderPath = '/root') => {
+    if (!files || files.length === 0) return;
+
+    const fileList = Array.from(files);
+    let updatedStructure = { ...fileStructure };
+
+    fileList.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const content = e.target.result;
+        const fileName = file.name;
+        const normalizedParent = targetFolderPath === '/root' ? '/root' : targetFolderPath;
+        const newPath = `${normalizedParent}/${fileName}`;
+
+        updatedStructure = setItemAtPath(updatedStructure, newPath, {
+          name: fileName,
+          type: 'file',
+          content: content,
+        });
+
+        setFileStructure({ ...updatedStructure });
+        setFileContents((prev) => ({ ...prev, [newPath]: content }));
+        codeRef.current = content;
+
+        setOpenFiles((prev) => (prev.includes(newPath) ? prev : [...prev, newPath]));
+        setActiveFile(newPath);
+
+        if (editorRef.current?.getEditor()) {
+          editorRef.current.getEditor().setValue(content);
+        }
+
+        if (socketRef.current) {
+          socketRef.current.emit(ACTIONS.FILE_CREATE, {
+            roomId,
+            path: newPath,
+            fileName: fileName,
+          });
+          socketRef.current.emit(ACTIONS.CODE_CHANGE, {
+            roomId,
+            code: content,
+            filePath: newPath,
+            opId: generateOpId(),
+          });
+        }
+        toast.success(`Uploaded ${fileName}`);
+      };
+      reader.onerror = () => {
+        toast.error(`Failed to read ${file.name}`);
+      };
+      reader.readAsText(file);
+    });
+  };
+
   const handleCreateFile = (path) => {
     const fileName = path.split('/').pop();
     const newStructure = setItemAtPath(fileStructure, path, {
@@ -978,6 +1031,7 @@ function EditorPage() {
               onCreateFolder={handleCreateFolder}
               onDeleteItem={handleDeleteItem}
               onRenameItem={handleRenameItem}
+              onFileUpload={handleFileUpload}
             />
           </div>
 

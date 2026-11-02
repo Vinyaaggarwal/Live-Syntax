@@ -108,11 +108,28 @@ const FileTreeItem = ({ item, path, level, onSelect, onContextMenu, expandedFold
   );
 };
 
-function FileExplorer({ fileStructure, onFileSelect, onCreateFile, onCreateFolder, onDeleteItem, onRenameItem }) {
+function FileExplorer({ fileStructure, onFileSelect, onCreateFile, onCreateFolder, onDeleteItem, onRenameItem, onFileUpload }) {
   const [expandedFolders, setExpandedFolders] = useState(new Set(['/root']));
   const [contextMenu, setContextMenu] = useState(null);
   const [showInputDialog, setShowInputDialog] = useState(null); // { type: 'file' | 'folder' | 'rename', path: string }
   const [selectedFolderPath, setSelectedFolderPath] = useState('/root'); // Track currently selected folder
+  const fileInputRef = React.useRef(null);
+  const [uploadTargetFolder, setUploadTargetFolder] = useState('/root');
+
+  const triggerFileUpload = (targetFolder = selectedFolderPath || '/root') => {
+    setUploadTargetFolder(targetFolder);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleFileInputChange = (e) => {
+    const files = e.target.files;
+    if (files && files.length > 0 && onFileUpload) {
+      onFileUpload(files, uploadTargetFolder);
+    }
+  };
 
   const handleToggleFolder = (path) => {
     setExpandedFolders(prev => {
@@ -218,10 +235,35 @@ function FileExplorer({ fileStructure, onFileSelect, onCreateFile, onCreateFolde
           >
             + Folder
           </button>
+          <button 
+            className="btn btn-sm btn-outline-secondary text-light" 
+            onClick={() => triggerFileUpload(selectedFolderPath || '/root')}
+            title="Upload Files from Computer"
+            style={{ fontSize: '0.7rem', padding: '2px 6px' }}
+          >
+            <i className="bi bi-upload me-1"></i>Upload
+          </button>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileInputChange}
+            multiple
+            style={{ display: 'none' }}
+          />
         </div>
       </div>
 
-      <div className="file-tree">
+      <div 
+        className="file-tree"
+        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.dataTransfer.files && e.dataTransfer.files.length > 0 && onFileUpload) {
+            onFileUpload(e.dataTransfer.files, selectedFolderPath || '/root');
+          }
+        }}
+      >
         {fileStructure && fileStructure.children && (
           Object.entries(fileStructure.children).map(([name, item]) => (
             <FileTreeItem
@@ -256,6 +298,12 @@ function FileExplorer({ fileStructure, onFileSelect, onCreateFile, onCreateFolde
               </div>
               <div className="context-menu-item" onClick={handleCreateFolder}>
                 <i className="bi bi-folder-plus me-2"></i>New Folder
+              </div>
+              <div className="context-menu-item" onClick={() => {
+                triggerFileUpload(contextMenu.path);
+                closeContextMenu();
+              }}>
+                <i className="bi bi-upload me-2"></i>Upload File(s)
               </div>
               <div className="context-menu-divider"></div>
             </>

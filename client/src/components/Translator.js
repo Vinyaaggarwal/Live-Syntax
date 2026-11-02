@@ -76,6 +76,38 @@ function Translator() {
 
   const backendUrl = process.env.REACT_APP_BACKEND_URL || "http://localhost:5002";
 
+  const uploadInputRef = useRef(null);
+
+  // Upload file into source editor with auto language detection
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const ext = file.name.split('.').pop().toLowerCase();
+    const extToLang = {
+      py: 'python',
+      js: 'javascript',
+      jsx: 'javascript',
+      ts: 'typescript',
+      tsx: 'typescript',
+      cpp: 'cpp',
+      cc: 'cpp',
+      c: 'cpp',
+      java: 'java'
+    };
+    if (extToLang[ext]) {
+      setSourceLang(extToLang[ext]);
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setSourceCode(event.target.result);
+      toast.success(`Loaded ${file.name}`);
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
   // Load sample code for selected source language
   const handleLoadSample = () => {
     if (SAMPLES[sourceLang]) {
@@ -248,6 +280,20 @@ function Translator() {
             <button className="btn-icon-action" onClick={handleLoadSample}>
               <i className="bi bi-file-code"></i> Load Sample
             </button>
+            <button
+              className="btn-icon-action"
+              onClick={() => uploadInputRef.current?.click()}
+              title="Upload code file from computer"
+            >
+              <i className="bi bi-upload"></i> Upload File
+            </button>
+            <input
+              type="file"
+              ref={uploadInputRef}
+              onChange={handleFileUpload}
+              style={{ display: "none" }}
+              accept=".py,.js,.jsx,.ts,.tsx,.cpp,.cc,.c,.java,.txt,.json,.html,.css"
+            />
           </div>
 
           <div className="controls-right">
