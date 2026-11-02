@@ -542,19 +542,28 @@ function EditorPage() {
     try {
       let response;
       const backendUrl = process.env.REACT_APP_BACKEND_URL || "http://localhost:5002";
+      const translationPayload = {
+        source_code: currentCode,
+        source_lang: srcLang,
+        target_lang: targetTranslateLang,
+      };
+
+      // Try Node proxy first, then fall back directly to Altern engine
       try {
-        response = await axios.post(`${backendUrl}/api/translate`, {
-          source_code: currentCode,
-          source_lang: srcLang,
-          target_lang: targetTranslateLang,
-        }, { timeout: 8000 });
-      } catch (proxyErr) {
-        // Fallback directly to Altern FastAPI microservice on port 8000
-        response = await axios.post("http://localhost:8000/translate", {
-          source_code: currentCode,
-          source_lang: srcLang,
-          target_lang: targetTranslateLang,
-        }, { timeout: 8000 });
+        response = await axios.post(`${backendUrl}/api/translate`, translationPayload, { timeout: 5000 });
+      } catch (_proxyErr) {
+        try {
+          response = await axios.post("http://localhost:8000/translate", translationPayload, { timeout: 5000 });
+        } catch (directErr) {
+          const isTimeout = directErr.code === 'ECONNABORTED' || (directErr.message || '').includes('timeout');
+          const isUnreachable = directErr.code === 'ERR_NETWORK' || directErr.code === 'ECONNREFUSED';
+          if (isTimeout || isUnreachable) {
+            toast.error("Altern engine not running. Open a terminal and run: python model_server/server.py", { duration: 8000 });
+          } else {
+            toast.error(`Translation error: ${directErr.message}`);
+          }
+          return;
+        }
       }
 
       const convertedCode = response.data?.converted_code;
@@ -1341,9 +1350,13 @@ function EditorPage() {
                 &times;
               </button>
             </div>
-            <p style={{ fontSize: '13px', color: '#8b949e', marginBottom: '16px' }}>
-              Translate the active file <strong>{activeFile}</strong> to another programming language in real-time.
+            <p style={{ fontSize: '13px', color: '#8b949e', marginBottom: '8px' }}>
+              Translate <strong>{activeFile}</strong> to another language in real-time.
             </p>
+            <div style={{ background: 'rgba(255,193,7,0.1)', border: '1px solid rgba(255,193,7,0.3)', borderRadius: '6px', padding: '8px 12px', marginBottom: '16px', fontSize: '12px', color: '#ffc107' }}>
+              <i className="bi bi-exclamation-triangle me-1"></i>
+              <strong>Requires Altern engine:</strong> Run <code style={{background:'rgba(0,0,0,0.3)',padding:'1px 4px',borderRadius:'3px'}}>python model_server/server.py</code> in a terminal first.
+            </div>
             <div style={{ marginBottom: '16px' }}>
               <label style={{ display: 'block', fontSize: '12px', color: '#8b949e', marginBottom: '6px' }}>
                 Target Language:
