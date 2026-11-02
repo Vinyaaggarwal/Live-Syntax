@@ -615,7 +615,8 @@ function EditorPage() {
             opId: generateOpId(),
           });
         }
-        toast.success(`Translated & saved as ${baseName}_${targetTranslateLang}.${newExt}`);
+        const timingMsg = response.data?.translation_time_ms ? ` (${response.data.translation_time_ms}ms${response.data.cached ? ' - cached' : ''})` : '';
+        toast.success(`Translated & saved as ${baseName}_${targetTranslateLang}.${newExt}${timingMsg}`);
       } else {
         setFileContents((prev) => ({ ...prev, [activeFile]: convertedCode }));
         codeRef.current = convertedCode;
@@ -630,7 +631,8 @@ function EditorPage() {
             opId: generateOpId(),
           });
         }
-        toast.success(`Translated active file to ${targetTranslateLang}`);
+        const timingMsg = response.data?.translation_time_ms ? ` (${response.data.translation_time_ms}ms${response.data.cached ? ' - cached' : ''})` : '';
+        toast.success(`Translated active file to ${targetTranslateLang}${timingMsg}`);
       }
       setIsTranslateModalOpen(false);
     } catch (err) {

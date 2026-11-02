@@ -110,16 +110,24 @@ function Translator() {
 
     setIsTranslating(true);
     try {
-      const response = await axios.post(`${backendUrl}/api/translate`, {
+      const payload = {
         source_code: sourceCode,
         source_lang: sourceLang,
         target_lang: targetLang,
         use_model: useModel,
-      });
+      };
+
+      let response;
+      try {
+        response = await axios.post("http://localhost:8000/translate", payload, { timeout: 6000 });
+      } catch (_directErr) {
+        response = await axios.post(`${backendUrl}/api/translate`, payload, { timeout: 6000 });
+      }
 
       if (response.data?.converted_code) {
         setConvertedCode(response.data.converted_code);
-        toast.success(`Translated to ${targetLang}!`);
+        const timingMsg = response.data?.translation_time_ms ? ` (${response.data.translation_time_ms}ms${response.data.cached ? ' - cached' : ''})` : '';
+        toast.success(`Translated to ${targetLang}${timingMsg}!`);
       } else {
         toast.error("Translation returned empty code");
       }
@@ -142,11 +150,18 @@ function Translator() {
     setIsRunning(true);
     setExecutionOutput("Executing code locally via Altern runner...\n");
     try {
-      const response = await axios.post(`${backendUrl}/api/execute`, {
+      const execPayload = {
         code: codeToRun,
         language: langToRun,
         stdin: stdinInput,
-      });
+      };
+
+      let response;
+      try {
+        response = await axios.post("http://localhost:8000/execute", execPayload, { timeout: 15000 });
+      } catch (_directErr) {
+        response = await axios.post(`${backendUrl}/api/execute`, execPayload, { timeout: 15000 });
+      }
 
       const { stdout, stderr, exit_code, execution_time_ms } = response.data;
       let outputText = "";

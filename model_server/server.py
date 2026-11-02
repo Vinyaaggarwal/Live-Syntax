@@ -17,6 +17,8 @@ import subprocess
 import tempfile
 import time
 import threading
+import hashlib
+from collections import OrderedDict
 import uvicorn
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -62,8 +64,9 @@ import asyncio
 
 @asynccontextmanager
 async def lifespan(app):
-    """Startup hook — loads AI model in background so server starts immediately."""
+    """Startup hook — loads AI model and probes Ollama in background so server starts immediately with zero delay."""
     threading.Thread(target=load_ai_model, daemon=True).start()
+    threading.Thread(target=_probe_ollama_worker, daemon=True).start()
     yield
 
 app = FastAPI(
@@ -125,6 +128,8 @@ class TranslationResponse(BaseModel):
     target_lang: str
     converted_code: str
     model_used: str
+    translation_time_ms: float = 0.0
+    cached: bool = False
 
 class ExecuteRequest(BaseModel):
     code: str = Field(..., description="Source or Target code to execute")
@@ -237,29 +242,63 @@ def _run_hf_inference(prompt: str, result_box: list) -> None:
     except Exception as e:
         print(f"[Altern] Model inference error: {e}")
 
-def try_ai_model_translation(source_code: str, src_lang: str, tgt_lang: str) -> str:
-    """Attempts local LLM translation. Falls through to structural engine if unavailable or timed out."""
-    prompt = build_translation_prompt(source_code, src_lang, tgt_lang)
 
-    # 1. Try local Ollama instance if available
+# --- High-Speed Translation Cache & Ollama Health Probe ---
+_translation_cache = OrderedDict()
+_MAX_TRANSLATION_CACHE = 4096
+_ollama_is_running = False
+_ollama_last_check = 0.0
+
+def _probe_ollama_worker():
+    global _ollama_is_running, _ollama_last_check
     try:
         import requests as _req
-        resp = _req.post(
-            "http://localhost:11434/api/generate",
-            json={"model": "deepseek-coder", "prompt": prompt, "stream": False},
-            timeout=2.0
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            if "response" in data and data["response"].strip():
-                return clean_model_output(data["response"])
+        r = _req.get("http://localhost:11434/api/tags", timeout=0.4)
+        _ollama_is_running = (r.status_code == 200)
     except Exception:
-        pass
+        _ollama_is_running = False
+    _ollama_last_check = time.time()
+
+def _check_ollama_health() -> bool:
+    """Non-blocking Ollama health query. Probes asynchronously so translate requests never wait on sockets."""
+    global _ollama_is_running, _ollama_last_check
+    now = time.time()
+    if now - _ollama_last_check > 120.0:
+        _ollama_last_check = now
+        threading.Thread(target=_probe_ollama_worker, daemon=True).start()
+    return _ollama_is_running
+
+def try_ai_model_translation(source_code: str, src_lang: str, tgt_lang: str) -> str:
+    """Attempts local LLM translation. Falls through to structural engine if unavailable or timed out."""
+    global _ai_model, _ai_tokenizer
+
+    # Fast short-circuit: if neither Ollama nor HF model is available, skip immediately in 0ms
+    ollama_ok = _check_ollama_health()
+    hf_ok = (_ai_model is not None and _ai_tokenizer is not None)
+    if not ollama_ok and not hf_ok:
+        return None
+
+    prompt = build_translation_prompt(source_code, src_lang, tgt_lang)
+
+    # 1. Try local Ollama instance if verified running
+    if ollama_ok:
+        try:
+            import requests as _req
+            resp = _req.post(
+                "http://localhost:11434/api/generate",
+                json={"model": "deepseek-coder", "prompt": prompt, "stream": False},
+                timeout=10.0
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if "response" in data and data["response"].strip():
+                    return clean_model_output(data["response"])
+        except Exception:
+            pass
 
     # 2. Use pre-loaded local HuggingFace DeepSeek-Coder model
-    global _ai_model, _ai_tokenizer
-    if _ai_model is None or _ai_tokenizer is None:
-        return None  # Still loading or not loaded — fall through to structural engine
+    if not hf_ok:
+        return None
 
     result_box = [None]
     timeout_secs = _get_llm_timeout()
@@ -430,42 +469,74 @@ def rule_assisted_fallback_translation(source_code: str, src_lang: str, tgt_lang
 
 @app.post("/translate", response_model=TranslationResponse)
 def translate_code(req: TranslationRequest):
+    start_t = time.perf_counter()
     try:
         src_clean = normalize_language(req.source_lang)
         tgt_clean = normalize_language(req.target_lang)
     except ValueError as val_err:
         raise HTTPException(status_code=400, detail=str(val_err))
 
-    if src_clean == tgt_clean:
+    raw_code = req.source_code.strip()
+    if src_clean == tgt_clean or not raw_code:
+        elapsed_ms = round((time.perf_counter() - start_t) * 1000, 2)
         return TranslationResponse(
             status="success",
             source_lang=src_clean,
             target_lang=tgt_clean,
             converted_code=req.source_code,
-            model_used="passthrough"
+            model_used="passthrough",
+            translation_time_ms=elapsed_ms,
+            cached=False
         )
 
-    source_line_count = len(req.source_code.strip().splitlines())
-
-    # 1. Primary engine: Real local DeepSeek-Coder AI model
-    ai_result = try_ai_model_translation(req.source_code, src_clean, tgt_clean)
-    if ai_result and ai_result.strip():
+    # 0. Check high-speed LRU memory cache
+    cache_key = hashlib.md5(f"{src_clean}:{tgt_clean}:{raw_code}".encode("utf-8")).hexdigest()
+    if cache_key in _translation_cache:
+        _translation_cache.move_to_end(cache_key)
+        elapsed_ms = round((time.perf_counter() - start_t) * 1000, 2)
         return TranslationResponse(
             status="success",
             source_lang=src_clean,
             target_lang=tgt_clean,
-            converted_code=clean_model_output(ai_result),
-            model_used="deepseek-ai/deepseek-coder-1.3b-instruct"
+            converted_code=_translation_cache[cache_key],
+            model_used="cache:fast_structural",
+            translation_time_ms=elapsed_ms,
+            cached=True
         )
 
-    # 2. Fallback: Fast structural engine if model is still loading or unavailable
+    # 1. Primary engine: Real local DeepSeek-Coder AI model (if active)
+    ai_result = try_ai_model_translation(raw_code, src_clean, tgt_clean)
+    if ai_result and ai_result.strip():
+        cleaned = clean_model_output(ai_result)
+        if len(_translation_cache) >= _MAX_TRANSLATION_CACHE:
+            _translation_cache.popitem(last=False)
+        _translation_cache[cache_key] = cleaned
+        elapsed_ms = round((time.perf_counter() - start_t) * 1000, 2)
+        return TranslationResponse(
+            status="success",
+            source_lang=src_clean,
+            target_lang=tgt_clean,
+            converted_code=cleaned,
+            model_used="deepseek-ai/deepseek-coder-1.3b-instruct",
+            translation_time_ms=elapsed_ms,
+            cached=False
+        )
+
+    # 2. Fallback: Ultra-fast structural engine (< 5ms)
     converted = rule_assisted_fallback_translation(req.source_code, src_clean, tgt_clean)
+    cleaned = clean_model_output(converted)
+    if len(_translation_cache) >= _MAX_TRANSLATION_CACHE:
+        _translation_cache.popitem(last=False)
+    _translation_cache[cache_key] = cleaned
+    elapsed_ms = round((time.perf_counter() - start_t) * 1000, 2)
     return TranslationResponse(
         status="success",
         source_lang=src_clean,
         target_lang=tgt_clean,
-        converted_code=clean_model_output(converted),
-        model_used="structural_fallback"
+        converted_code=cleaned,
+        model_used="structural_engine_v2",
+        translation_time_ms=elapsed_ms,
+        cached=False
     )
 
 
