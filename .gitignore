@@ -14,20 +14,43 @@ logs
 *.log
 npm-debug.log*
 
-# OS files
-.DS_Store
-Thumbs.db
+# Python byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
 
-# IDE
+# C/C++ compiled binaries and objects
+*.o
+*.obj
+*.exe
+-.o
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Build and distribution output
+build/
+dist/
+*.tsbuildinfo
+*.egg-info/
+
+# PyTorch / HuggingFace model cache
+checkpoints/
+lora_output/
+*.pt
+*.bin
+
+# Local project storage
+server/projects/
+
+# IDE and OS files
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# Build output
-build/
-dist/
-*.tsbuildinfo
-
-# Local project storage
-server/projects/
+.DS_Store
+Thumbs.db
