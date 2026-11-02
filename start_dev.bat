@@ -4,8 +4,11 @@ echo Starting Unified Live-Syntax + Altern AI Platform
 echo ========================================================
 echo.
 
+set PY_EXE=python
+if exist "%~dp0venv\Scripts\python.exe" set PY_EXE="%~dp0venv\Scripts\python.exe"
+
 echo [1/3] Starting Altern AI Model Server (Port 8000)...
-start "Altern Model Server" cmd /k "cd /d %~dp0 && python model_server/server.py"
+start "Altern Model Server" cmd /k "cd /d %~dp0 && %PY_EXE% model_server/server.py"
 
 echo [2/3] Starting Live-Syntax Node Collaboration Server (Port 5002)...
 start "Live-Syntax Server" cmd /k "cd /d %~dp0server && npm start"

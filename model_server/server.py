@@ -1,3 +1,10 @@
+import os
+import sys
+
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+if _current_dir not in sys.path:
+    sys.path.insert(0, _current_dir)
+
 import engine_v2
 """
 Local FastAPI AI Model Translation Microservice (No External APIs)
@@ -886,4 +893,4 @@ async def ws_execute(websocket: WebSocket):
 if __name__ == "__main__":
     print("Starting Altern Local Translation AI Server on port 8000...")
     print("[Altern] Mode: Fast Structural Engine (instant startup, no RAM spike)")
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
