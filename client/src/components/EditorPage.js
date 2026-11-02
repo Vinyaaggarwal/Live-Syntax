@@ -548,19 +548,19 @@ function EditorPage() {
         target_lang: targetTranslateLang,
       };
 
-      // Try Node proxy first, then fall back directly to Altern engine
+      // Try direct Altern engine first (instant, port 8000), then fallback to Node proxy (port 5002)
       try {
-        response = await axios.post(`${backendUrl}/api/translate`, translationPayload, { timeout: 5000 });
-      } catch (_proxyErr) {
+        response = await axios.post("http://localhost:8000/translate", translationPayload, { timeout: 6000 });
+      } catch (_directErr) {
         try {
-          response = await axios.post("http://localhost:8000/translate", translationPayload, { timeout: 5000 });
-        } catch (directErr) {
-          const isTimeout = directErr.code === 'ECONNABORTED' || (directErr.message || '').includes('timeout');
-          const isUnreachable = directErr.code === 'ERR_NETWORK' || directErr.code === 'ECONNREFUSED';
+          response = await axios.post(`${backendUrl}/api/translate`, translationPayload, { timeout: 6000 });
+        } catch (proxyErr) {
+          const isTimeout = proxyErr.code === 'ECONNABORTED' || (proxyErr.message || '').includes('timeout');
+          const isUnreachable = proxyErr.code === 'ERR_NETWORK' || proxyErr.code === 'ECONNREFUSED';
           if (isTimeout || isUnreachable) {
-            toast.error("Altern engine not running. Open a terminal and run: python model_server/server.py", { duration: 8000 });
+            toast.error("Altern engine not running. Run: python model_server/server.py", { duration: 8000 });
           } else {
-            toast.error(`Translation error: ${directErr.message}`);
+            toast.error(`Translation error: ${proxyErr.message}`);
           }
           return;
         }
@@ -593,38 +593,50 @@ function EditorPage() {
 
         setFileStructure(newStructure);
         setFileContents((prev) => ({ ...prev, [newPath]: convertedCode }));
+        codeRef.current = convertedCode;
         if (!openFiles.includes(newPath)) {
           setOpenFiles((prev) => [...prev, newPath]);
         }
         setActiveFile(newPath);
+        if (editorRef.current?.getEditor()) {
+          editorRef.current.getEditor().setValue(convertedCode);
+        }
 
-        socketRef.current.emit(ACTIONS.FILE_CREATE, {
-          roomId,
-          path: newPath,
-          fileName: `${baseName}_${targetTranslateLang}.${newExt}`,
-        });
-        socketRef.current.emit(ACTIONS.CODE_CHANGE, {
-          roomId,
-          code: convertedCode,
-          filePath: newPath,
-          opId: generateOpId(),
-        });
+        if (socketRef.current) {
+          socketRef.current.emit(ACTIONS.FILE_CREATE, {
+            roomId,
+            path: newPath,
+            fileName: `${baseName}_${targetTranslateLang}.${newExt}`,
+          });
+          socketRef.current.emit(ACTIONS.CODE_CHANGE, {
+            roomId,
+            code: convertedCode,
+            filePath: newPath,
+            opId: generateOpId(),
+          });
+        }
         toast.success(`Translated & saved as ${baseName}_${targetTranslateLang}.${newExt}`);
       } else {
         setFileContents((prev) => ({ ...prev, [activeFile]: convertedCode }));
-        socketRef.current.emit(ACTIONS.CODE_CHANGE, {
-          roomId,
-          code: convertedCode,
-          filePath: activeFile,
-          opId: generateOpId(),
-        });
+        codeRef.current = convertedCode;
+        if (editorRef.current?.getEditor()) {
+          editorRef.current.getEditor().setValue(convertedCode);
+        }
+        if (socketRef.current) {
+          socketRef.current.emit(ACTIONS.CODE_CHANGE, {
+            roomId,
+            code: convertedCode,
+            filePath: activeFile,
+            opId: generateOpId(),
+          });
+        }
         toast.success(`Translated active file to ${targetTranslateLang}`);
       }
       setIsTranslateModalOpen(false);
     } catch (err) {
       console.error("Translation error:", err);
       const msg = err.response?.data?.details || err.response?.data?.error || err.message;
-      toast.error(`Translation failed: ${msg}. Make sure Altern engine is running.`);
+      toast.error(`Translation failed: ${msg}`);
     } finally {
       setIsTranslatingFile(false);
     }
